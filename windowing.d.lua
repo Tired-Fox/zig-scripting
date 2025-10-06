@@ -1,0 +1,70 @@
+--- @alias CursorType 'default'
+---     | 'context_menu'
+---     | 'help'
+---     | 'pointer'
+---     | 'progress'
+---     | 'wait'
+---     | 'cell'
+---     | 'crosshair'
+---     | 'text'
+---     | 'vertical_text'
+---     | 'alias'
+---     | 'copy'
+---     | 'move'
+---     | 'no_drop'
+---     | 'not_allowed'
+---     | 'grab'
+---     | 'grabbing'
+---     | 'e_resize'
+---     | 'n_resize'
+---     | 'ne_resize'
+---     | 'nw_resize'
+---     | 's_resize'
+---     | 'se_resize'
+---     | 'sw_resize'
+---     | 'w_resize'
+---     | 'ew_resize'
+---     | 'ns_resize'
+---     | 'nesw_resize'
+---     | 'nwse_resize'
+---     | 'col_resize'
+---     | 'row_resize'
+---     | 'all_scroll'
+---     | 'zoom_in'
+---     | 'zoom_out'
+
+--- @class Cursor
+--- @field path string
+--- @field width ?integer
+--- @field height ?integer
+
+--- @alias IconType 'default'
+---     | 'error'
+---     | 'question'
+---     | 'warning'
+---     | 'information'
+---     | 'security'
+
+--- @class WindowOptions
+--- @field title ?string
+--- @field width ?number
+--- @field height ?number
+--- @field show ?'maximize'|'minimize'|'restore'|'fullscreen'|'hidden'
+--- @field cursor ?{ icon: CursorType }|{ custom: Cursor }
+--- @field theme ?'system'|'dark'|'light'
+--- @field icon ?{ icon: IconType }|{ custom: string }
+--- @field x ?number
+--- @field y ?number
+--- @field resizable ?boolean
+
+--- @class EventLoop
+--- @field createWindow fun(self, options: WindowOptions): Window Create a new window
+--- @field isActive fun(self): boolean
+--- @field wait fun(self)
+--- @field pop fun(self): table<string, string>
+--- @field closeWindow fun(self, id: number)
+EventLoop = {}
+
+--- @class Window
+--- @field show fun(self) Show the window
+--- @field id fun(self): integer

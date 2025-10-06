@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Optional: emit pdb for nicer stack traces -->
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <!-- <ItemGroup> -->
+  <!-- Include all .cs files under this folder -->
+  <!--   <Compile Include="**\*.cs" /> -->
+  <!-- </ItemGroup> -->
+
+  <ItemGroup>
+    <!-- Reference the Engine.dll we build next-door -->
+    <Reference Include="Engine">
+      <HintPath>..\..\Engine\bin\$(Configuration)\net472\Engine.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
