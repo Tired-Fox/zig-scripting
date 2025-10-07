@@ -1,67 +1,138 @@
 const std = @import("std");
-const m = @import("mono_bindings.zig");
+const mono = @import("mono.zig");
 
-fn native_log(s: *m.MonoString) callconv(.c) void {
-    const c_str = m.mono_string_to_utf8(s);
-    defer m.mono_free(@ptrCast(@constCast(c_str)));
+fn nativeLog(s: *mono.String) callconv(.c) void {
+    const c_str = s.toUtf8();
+    defer mono.free(@ptrCast(c_str));
 
-    std.debug.print("[C#] {s}\n", .{ std.mem.sliceTo(@as([*:0]const u8, @ptrCast(@constCast(c_str))), 0) });
+    if (c_str) |str| {
+        std.debug.print("[C#] {s}\n", .{ str });
+    }
 }
 
+const TypeDef = struct {
+    assembly: [:0]const u8,
+    namespace: [:0]const u8,
+    class: [:0]const u8,
 
-fn native_delta_time() callconv(.c) f32 {
-    return 0.016; // ~60 FPS
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.assembly);
+        allocator.free(self.namespace);
+        allocator.free(self.class);
+    }
+};
+
+fn indexTypes(allocator: std.mem.Allocator, assembly: *mono.Assembly, base: *mono.Class) ![]TypeDef {
+    const img = assembly.getImage() orelse return error.NoImage;
+    const asm_name = assembly.getName().getName();
+
+    const tdef = img.getTableInfo(mono.MONO_TABLE_TYPEDEF);
+    const rows: usize = @intCast(tdef.getRows());
+
+    var types: std.ArrayList(TypeDef) = .empty;
+    defer types.deinit(allocator);
+    errdefer for (types.items) |item| item.deinit(allocator);
+
+    for (0..rows) |i| {
+        var cols: [mono.MONO_TYPEDEF_SIZE]u32 = undefined;
+        tdef.metadataDecodeRow(@intCast(i), &cols);
+
+        const ns = img.metadataStringHeap(cols[mono.MONO_TYPEDEF_NAMESPACE]);
+        const name = img.metadataStringHeap(cols[mono.MONO_TYPEDEF_NAME]);
+
+        if (name.len > 0 and name[0] == '<') continue;
+
+        const klass = img.classFromName(ns, name);
+        if (klass == null) continue;
+
+        if (klass.?.isSubclassOf(base)) {
+            try types.append(allocator, .{
+                .assembly = try allocator.dupeZ(u8, asm_name[0..]),
+                .namespace = try allocator.dupeZ(u8, ns[0..]),
+                .class = try allocator.dupeZ(u8, name[0..]),
+            });
+        }
+    }
+
+    return try types.toOwnedSlice(allocator);
 }
 
-fn runScriptsInChildDomain() !void {
-    const root = m.mono_get_root_domain();
+fn runScriptsInChildDomain(allocator: std.mem.Allocator, base: *mono.Class) !void {
+    const root = mono.getRootDomain();
 
-    const child = m.mono_domain_create_appdomain("ScriptsDomain", null) orelse return error.CreateDomain;
-    _ = m.mono_domain_set(child, 0);
-    _ = m.mono_thread_attach(child);
+    const child = root.createAppDomain("ScriptsDomain", null) orelse return error.CreateDomain;
+    _ = child.set(false);
+    _ = mono.Thread.attach(child);
 
-    const assembly = m.mono_domain_assembly_open(child, "Managed/Scripts.dll") orelse return error.OpenAssemblyFailed;
-    const img = m.mono_assembly_get_image(assembly) orelse return error.NoImage;
+    const assembly = child.openAssembly("Managed/Scripts.dll") orelse return error.OpenAssemblyFailed;
+    const img = assembly.getImage() orelse return error.NoImage;
 
-    const klass = m.mono_class_from_name(img, "Scripts", "Entry") orelse return error.NoClass;
-    const method = m.mono_class_get_method_from_name(klass, "Tick", 2) orelse return error.NoMethod;
+    const types = try indexTypes(allocator, assembly, base);
+    defer {
+        for (types) |t| t.deinit(allocator);
+        allocator.free(types);
+    }
 
-    var args: [2]?*anyopaque = .{ null, null };
-    const str = m.mono_string_new(child, "Zig -> c# via mono!") orelse return error.StringAlloc;
-    args[0] = @ptrCast(str);
-    var dt: c_int = 2;
-    args[1] = @ptrCast(&dt);
+    for (types) |t| {
+        std.debug.print("{s}.{s}\n", .{ if (t.namespace.len == 0) "<GLOBAL>" else t.namespace, t.class });
+        const klass = img.classFromName(t.namespace, t.class) orelse return error.NoClass;
 
-    // Invoke
-    var exec: ?*m.MonoObject = null;
-    const ret_obj = m.mono_runtime_invoke(method, null, &args, &exec);
-    if (exec != null) return error.ManagedException;
+        const instance = child.newObject(klass) orelse continue;
+        const h = mono.GC.new(instance, false);
 
-    const p = m.mono_object_unbox(@ptrCast(ret_obj));
-    const result: c_int = @as(*c_int, @ptrCast(@alignCast(p))).*;
-    std.debug.print("Managed Tick returned {d}\n", .{result});
+        instance.runtimeInit();
 
-    _ = m.mono_domain_set(root, 0);
-    m.mono_domain_unload(child);
+        if (klass.getMethodFromName("Awake", 0)) |method| {
+            var exc: ?*mono.Object = null;
+            _ = method.runtimeInvoke(instance, &.{}, &exc);
+        }
+
+        if (klass.getMethodFromName("Update", 1)) |method| {
+            var exc: ?*mono.Object = null;
+
+            var args: [1]?*anyopaque = .{ null };
+
+            var dt: f32 = 0.016;
+            args[0] = @ptrCast(&dt);
+
+            _ = method.runtimeInvoke(instance, &args, &exc);
+        }
+
+        if (klass.getMethodFromName("Destroy", 0)) |method| {
+            var exc: ?*mono.Object = null;
+            _ = method.runtimeInvoke(instance, &.{}, &exc);
+        }
+
+        mono.GC.free(h);
+    }
+
+    _ = root.set(false);
+    child.unload();
 }
-
 
 /// Load libraries and attach internal function calls available
 /// to the root domain
-fn register_internal() !void {
-    m.mono_add_internal_call("StoryTree.Engine.Native::Log", @ptrCast(&native_log));
-    m.mono_add_internal_call("StoryTree.Engine.Native::DeltaTime", @ptrCast(&native_delta_time));
+fn registerInternal() !void {
+    mono.addInternalCall("StoryTree.Engine.Native::Log", @ptrCast(&nativeLog));
 }
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     // Bootstrap
     // m.mono_set_dirs("mono/lib", "mono/etc");
     // m.mono_config_parse(null);
 
-    const root = m.mono_jit_init_version("ZigGame", "v4.0.30319") orelse return error.MonoInitFailure;
+    const root = mono.jitInitVersion("ZigGame", "v4.0.30319") orelse return error.MonoInitFailure;
 
-    _ = m.mono_domain_assembly_open(root, "Managed/Engine.dll") orelse return error.OpenAssemblyFailed;
-    try register_internal();
+    const engine = root.openAssembly("Managed/Engine.dll") orelse return error.OpenAssemblyFailed;
+    const img = engine.getImage() orelse return error.NoImage;
 
-    try runScriptsInChildDomain();
+    try registerInternal();
+
+    const behavior = img.classFromName("StoryTree.Engine", "Behavior") orelse return error.NoClass;
+
+    try runScriptsInChildDomain(allocator, behavior);
 }

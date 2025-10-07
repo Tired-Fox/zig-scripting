@@ -9,7 +9,7 @@ namespace Scripts
 
         public void Update()
         {
-            Native.Log($"[Enemy] {Kind} slithers… dt={Native.DeltaTime()}");
+            Native.Log($"[Enemy] {Kind} slithers…");
         }
     }
 }

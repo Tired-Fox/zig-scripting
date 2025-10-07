@@ -1,15 +1,19 @@
 using StoryTree.Engine;
 
-namespace Scripts
+public class Player: Behavior
 {
-    public class Player
-    {
-        public string Name = "Hero";
-        public int Health = 100;
+    public string Name = "Hero";
+    public int Health = 100;
 
-        public void Update()
-        {
-            Native.Log($"[Player] {Name} updating... dt={Native.DeltaTime()}");
-        }
+    void Awake() {
+        Native.Log($"[Player] Awake Name={Name}, Health={Health}");
+    }
+
+    void Update(float dt) {
+        Native.Log($"[Player] Update dt={dt}");
+    }
+
+    void Destroy() {
+        Native.Log($"[Player] Destroy");
     }
 }

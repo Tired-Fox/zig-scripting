@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- Mono-friendly classic profile -->
     <TargetFramework>net472</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <!-- Optional: emit pdb for nicer stack traces -->
@@ -13,8 +14,6 @@
 
   <ItemGroup>
     <!-- Reference the Engine.dll we build next-door -->
-    <Reference Include="Engine">
-      <HintPath>..\..\Engine\bin\$(Configuration)\net472\Engine.dll</HintPath>
-    </Reference>
+    <Reference Include="..\..\Engine\bin\Release\net472\Engine.dll" />
   </ItemGroup>
 </Project>

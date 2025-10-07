@@ -2,12 +2,18 @@ using StoryTree.Engine;
 
 namespace Scripts
 {
-    public static class Entry
+    public class Entry: Behavior
     {
-        public static int Tick(string who, int x)
-        {
-            Native.Log($"[Entry] Tick from {who}, x={x}, dt={Native.DeltaTime()}");
-            return x * 2;
+        void Awake() {
+            Native.Log("[Entry] Awake");
+        }
+
+        void Update(float dt) {
+            Native.Log($"[Entry] Update dt={dt}");
+        }
+
+        void Destroy() {
+            Native.Log($"[Entry] Destroy");
         }
     }
 }
