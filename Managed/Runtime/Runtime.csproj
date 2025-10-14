@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+
+    <!-- we’re a library, but we want a runtimeconfig -->
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+
+    <!-- pin exactly what your packaged runtime provides -->
+    <RuntimeFrameworkVersion>8.0.20</RuntimeFrameworkVersion>
+    <RollForward>Disable</RollForward>
+
+    <!-- Turn off com hosting -->
+    <EnableComHosting>false</EnableComHosting>
+    <IsComHostedApp>false</IsComHostedApp>
+    <EnableGeneratedComInterfaceSourceGenerators>false</EnableGeneratedComInterfaceSourceGenerators>
+
+    <!-- Don't pull desktop stacks -->
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Some SDKs honor this precedence for the pinned framework -->
+  <ItemGroup>
+    <FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="8.0.20" />
+  </ItemGroup>
+</Project>

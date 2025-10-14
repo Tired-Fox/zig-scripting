@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    try luaExe(b, target, optimize);
+    try monoCSharpExe(b, target, optimize);
+    try csharpExe(b, target, optimize);
+}
+
+pub fn luaExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
     const lua_dep = b.dependency("zlua", .{
         .target = target,
         .optimize = optimize,
@@ -21,7 +27,6 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                // .{ .name = "zig_script", .module = mod },
                 .{ .name = "zlua", .module = lua_dep.module("zlua") },
                 .{ .name = "storytree-core", .module = st_core_dep.module("storytree-core") },
             },
@@ -37,18 +42,16 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_lua_cmd.addArgs(args);
     }
+}
 
+pub fn monoCSharpExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
     const csharp_exe = b.addExecutable(.{
-        .name = "zig_csharp",
+        .name = "zig_mono_csharp",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/csharp.zig"),
+            .root_source_file = b.path("src/mono_csharp.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                // .{ .name = "zig_script", .module = mod },
-                .{ .name = "zlua", .module = lua_dep.module("zlua") },
-                .{ .name = "storytree-core", .module = st_core_dep.module("storytree-core") },
-            },
+            .imports = &.{},
         }),
     });
 
@@ -75,8 +78,56 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    const run_csharp_step = b.step("run-csharp", "Run the csharp scripting");
+    const run_csharp_step = b.step("run-mono", "Run the mono csharp scripting");
     const run_csharp_cmd = b.addRunArtifact(csharp_exe);
+    run_csharp_step.dependOn(&run_csharp_cmd.step);
+    run_csharp_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_csharp_cmd.addArgs(args);
+    }
+}
+
+pub fn csharpExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
+    const exe = b.addExecutable(.{
+        .name = "zig_csharp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/csharp.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{},
+        }),
+    });
+
+    if (target.result.os.tag == .linux) {
+        exe.linkSystemLibrary("dl");
+        exe.linkSystemLibrary("pthread");
+        exe.addRPath(.{ .cwd_relative = "$ORIGIN" }); // if you ship any of your own .so’s
+    } else if (target.result.os.tag == .macos) {
+        exe.addRPath(.{ .cwd_relative = "@loader_path" });
+    } else if (target.result.os.tag == .windows) {
+        // nothing special—LoadLibraryW is in kernel32
+    }
+
+    exe.addIncludePath(.{ .cwd_relative = "third_party/dotnet/include" });
+
+    b.installArtifact(exe);
+
+    const copy_managed = b.addInstallDirectory(.{
+        .source_dir = .{ .cwd_relative = "managed/Runtime/bin/Release/net8.0" },
+        .install_dir = .bin,
+        .install_subdir = "managed",
+    });
+    const copy_runtime = b.addInstallDirectory(.{
+        .source_dir = .{ .cwd_relative = "dotnet" },
+        .install_dir = .bin,
+        .install_subdir = "dotnet",
+    });
+
+    exe.step.dependOn(&copy_managed.step);
+    exe.step.dependOn(&copy_runtime.step);
+
+    const run_csharp_step = b.step("run-csharp", "Run the csharp scripting");
+    const run_csharp_cmd = b.addRunArtifact(exe);
     run_csharp_step.dependOn(&run_csharp_cmd.step);
     run_csharp_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {

@@ -1,138 +1,225 @@
 const std = @import("std");
-const mono = @import("mono.zig");
 
-fn nativeLog(s: *mono.String) callconv(.c) void {
-    const c_str = s.toUtf8();
-    defer mono.free(@ptrCast(c_str));
+const hostfxr = @cImport({
+    @cInclude("hostfxr.h");
+});
 
-    if (c_str) |str| {
-        std.debug.print("[C#] {s}\n", .{ str });
+const HostFxr_Handle = ?*anyopaque;
+
+const TAG = @import("builtin").os.tag;
+
+const char_t = if (TAG == .windows) u16 else u8;
+
+const hostfxr_initialize_for_runtime_config_fn = fn (
+    runtime_config_path: [*:0]const char_t,
+    parameters: ?*anyopaque,
+    host_context_handle: *?*anyopaque,
+) callconv(.c) c_int;
+
+const hostfxr_get_runtime_delegate_fn = fn (
+    host_context_handle: ?*anyopaque,
+    delegate_type: c_int,
+    out_delegate: *?*anyopaque,
+) callconv(.c) c_int;
+
+const hostfxr_close_fn = fn (host_context_handle: ?*anyopaque) callconv(.c) c_int;
+
+const load_assembly_and_get_function_pointer_fn = fn (
+    assembly_path: [*:0]const char_t,
+    type_name: [*:0]const char_t,
+    method_name: [*:0]const char_t,
+    delegate_type_name: ?[*:0]const char_t, // null for [UnmanagedCallersOnly]
+    reserved: ?*anyopaque,
+    out_fn: *?*anyopaque,
+) callconv(.c) c_int;
+
+fn toCharT(alloc: std.mem.Allocator, s: []const u8) ![:0]const char_t {
+    if (TAG == .windows) {
+        const w = try std.unicode.utf8ToUtf16LeAllocZ(alloc, s);
+        return @ptrCast(w);
+    } else {
+        return try std.mem.concat(alloc, u8, &.{ s, &[_]u8{0} });
     }
 }
 
-const TypeDef = struct {
-    assembly: [:0]const u8,
-    namespace: [:0]const u8,
-    class: [:0]const u8,
+fn dlopenHostFxrAbsolutePath(alloc: std.mem.Allocator, version: []const u8) !*anyopaque {
+    // Compute ./dotnet/host/fxr/<ver>/hostfxr.(dll|so|dylib)
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_dir = try std.fs.selfExeDirPath(&buf);
 
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.assembly);
-        allocator.free(self.namespace);
-        allocator.free(self.class);
-    }
-};
+    const libname = switch (TAG) {
+        .windows => "hostfxr.dll",
+        .macos => "libhostfxr.dylib",
+        else => "libhostfxr.so",
+    };
 
-fn indexTypes(allocator: std.mem.Allocator, assembly: *mono.Assembly, base: *mono.Class) ![]TypeDef {
-    const img = assembly.getImage() orelse return error.NoImage;
-    const asm_name = assembly.getName().getName();
+    const path = try std.fs.path.join(alloc, &.{ exe_dir, "dotnet", "host", "fxr", version, libname });
+    defer alloc.free(path);
 
-    const tdef = img.getTableInfo(mono.MONO_TABLE_TYPEDEF);
-    const rows: usize = @intCast(tdef.getRows());
+    return if (TAG == .windows) blk: {
+        const Ext = struct {
+            pub const DLL_DIRECTORY_COOKIE = *opaque {};
+            pub const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: u32 = 0x00001000;
+            extern "kernel32" fn SetDefaultDllDirectories(flags: u32) callconv(.winapi) std.os.windows.BOOL;
+            extern "kernel32" fn AddDllDirectory(newDirectory: [*:0]const u16) callconv(.winapi) DLL_DIRECTORY_COOKIE;
+            pub const LoadLibraryW = std.os.windows.LoadLibraryW;
+        };
 
-    var types: std.ArrayList(TypeDef) = .empty;
-    defer types.deinit(allocator);
-    errdefer for (types.items) |item| item.deinit(allocator);
+        _ = Ext.SetDefaultDllDirectories(Ext.LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        // Add ./dotnet so transitive native deps resolve
+        const dotnet_dir = try std.fs.path.join(alloc, &.{ exe_dir, "dotnet" });
+        defer alloc.free(dotnet_dir);
 
-    for (0..rows) |i| {
-        var cols: [mono.MONO_TYPEDEF_SIZE]u32 = undefined;
-        tdef.metadataDecodeRow(@intCast(i), &cols);
+        const dotnet_wide = try std.unicode.utf8ToUtf16LeAllocZ(alloc, dotnet_dir);
+        defer alloc.free(dotnet_wide);
 
-        const ns = img.metadataStringHeap(cols[mono.MONO_TYPEDEF_NAMESPACE]);
-        const name = img.metadataStringHeap(cols[mono.MONO_TYPEDEF_NAME]);
+        _ = Ext.AddDllDirectory(dotnet_wide.ptr);
 
-        if (name.len > 0 and name[0] == '<') continue;
+        const path_wide = try std.unicode.utf8ToUtf16LeAllocZ(alloc, path);
+        defer alloc.free(path_wide);
 
-        const klass = img.classFromName(ns, name);
-        if (klass == null) continue;
-
-        if (klass.?.isSubclassOf(base)) {
-            try types.append(allocator, .{
-                .assembly = try allocator.dupeZ(u8, asm_name[0..]),
-                .namespace = try allocator.dupeZ(u8, ns[0..]),
-                .class = try allocator.dupeZ(u8, name[0..]),
-            });
-        }
-    }
-
-    return try types.toOwnedSlice(allocator);
+        const h = try Ext.LoadLibraryW(path_wide.ptr);
+        break :blk @ptrCast(h);
+    } else blk: {
+        const handle = std.c.dlopenZ(path.ptr, std.c.RTLD_LAZY | std.c.RTLD_LOCAL);
+        if (handle == null) return error.HostFxrNotFound;
+        break :blk handle;
+    };
 }
 
-fn runScriptsInChildDomain(allocator: std.mem.Allocator, base: *mono.Class) !void {
-    const root = mono.getRootDomain();
-
-    const child = root.createAppDomain("ScriptsDomain", null) orelse return error.CreateDomain;
-    _ = child.set(false);
-    _ = mono.Thread.attach(child);
-
-    const assembly = child.openAssembly("Managed/Scripts.dll") orelse return error.OpenAssemblyFailed;
-    const img = assembly.getImage() orelse return error.NoImage;
-
-    const types = try indexTypes(allocator, assembly, base);
-    defer {
-        for (types) |t| t.deinit(allocator);
-        allocator.free(types);
-    }
-
-    for (types) |t| {
-        std.debug.print("{s}.{s}\n", .{ if (t.namespace.len == 0) "<GLOBAL>" else t.namespace, t.class });
-        const klass = img.classFromName(t.namespace, t.class) orelse return error.NoClass;
-
-        const instance = child.newObject(klass) orelse continue;
-        const h = mono.GC.new(instance, false);
-
-        instance.runtimeInit();
-
-        if (klass.getMethodFromName("Awake", 0)) |method| {
-            var exc: ?*mono.Object = null;
-            _ = method.runtimeInvoke(instance, &.{}, &exc);
-        }
-
-        if (klass.getMethodFromName("Update", 1)) |method| {
-            var exc: ?*mono.Object = null;
-
-            var args: [1]?*anyopaque = .{ null };
-
-            var dt: f32 = 0.016;
-            args[0] = @ptrCast(&dt);
-
-            _ = method.runtimeInvoke(instance, &args, &exc);
-        }
-
-        if (klass.getMethodFromName("Destroy", 0)) |method| {
-            var exc: ?*mono.Object = null;
-            _ = method.runtimeInvoke(instance, &.{}, &exc);
-        }
-
-        mono.GC.free(h);
-    }
-
-    _ = root.set(false);
-    child.unload();
+fn dlsym(handle: *anyopaque, name: [:0]const u8) ?*anyopaque {
+    return if (TAG == .windows)
+        @ptrCast(std.os.windows.kernel32.GetProcAddress(@ptrCast(@alignCast(handle)), name.ptr))
+    else
+        std.c.dlsym(handle, name.ptr);
 }
 
-/// Load libraries and attach internal function calls available
-/// to the root domain
-fn registerInternal() !void {
-    mono.addInternalCall("StoryTree.Engine.Native::Log", @ptrCast(&nativeLog));
+const hostfxr_error_writer_fn = fn (msg: [*:0]const char_t) callconv(.c) void;
+const hostfxr_set_error_writer_fn = fn (cb: ?*const hostfxr_error_writer_fn) callconv(.c) ?*const hostfxr_error_writer_fn;
+fn writeHostfxrError(msg: [*:0]const char_t) callconv(.c) void {
+    if (TAG == .windows) {
+        const slice = std.mem.span(msg);
+        const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, slice) catch return;
+        defer std.heap.page_allocator.free(utf8);
+        std.debug.print("[hostfxr] {s}\n", .{utf8});
+    } else {
+        std.debug.print("[hostfxr] {s}\n", .{msg});
+    }
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Bootstrap
-    // m.mono_set_dirs("mono/lib", "mono/etc");
-    // m.mono_config_parse(null);
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_dir = try std.fs.selfExeDirPath(&buf);
 
-    const root = mono.jitInitVersion("ZigGame", "v4.0.30319") orelse return error.MonoInitFailure;
+    const runtimeconfig_utf8 = try std.fs.path.join(allocator, &.{ exe_dir, "managed", "Runtime.runtimeconfig.json" });
+    defer allocator.free(runtimeconfig_utf8);
 
-    const engine = root.openAssembly("Managed/Engine.dll") orelse return error.OpenAssemblyFailed;
-    const img = engine.getImage() orelse return error.NoImage;
+    var fxr = try HostFxr.init(allocator, runtimeconfig_utf8);
+    defer fxr.deinit();
 
-    try registerInternal();
+    const assembly_path = try std.fs.path.join(allocator, &.{ exe_dir, "managed", "Runtime.dll" });
+    defer allocator.free(assembly_path);
 
-    const behavior = img.classFromName("StoryTree.Engine", "Behavior") orelse return error.NoClass;
+    const ping: *const fn () callconv(.c) u32 = @ptrCast(try fxr.load(
+        allocator,
+        assembly_path,
+        "Runtime",
+        "Host",
+        "Ping",
+    ));
 
-    try runScriptsInChildDomain(allocator, behavior);
+    // 6) Call the managed function
+    std.debug.print("Pong: {any}\n", .{ @call(.auto, ping, .{}) == 1 });
+
+    // Done. You should see "[C#] Hello, world!" in stdout.
 }
+
+const HostFxr = struct {
+    handle: *anyopaque,
+    context: ?*anyopaque,
+
+    close: *const hostfxr_close_fn,
+    load_fn: *const load_assembly_and_get_function_pointer_fn,
+
+    pub fn init(allocator: std.mem.Allocator, config: []const u8) !@This() {
+        // 1) Load hostfxr from our fixed ./dotnet path
+        const fxr_handle = try dlopenHostFxrAbsolutePath(allocator, "8.0.20");
+
+        const set_error_writer: *const hostfxr_set_error_writer_fn = @ptrCast(dlsym(fxr_handle, "hostfxr_set_error_writer") orelse return error.NoSetErrorWriter);
+        _ = set_error_writer(&writeHostfxrError);
+
+        const init_fn: *const hostfxr_initialize_for_runtime_config_fn = @ptrCast(dlsym(fxr_handle, "hostfxr_initialize_for_runtime_config") orelse return error.SymbolMissing);
+        const getRuntimeDelegate: *const hostfxr_get_runtime_delegate_fn = @ptrCast(dlsym(fxr_handle, "hostfxr_get_runtime_delegate") orelse return error.SymbolMissing);
+        const close: *const hostfxr_close_fn = @ptrCast(dlsym(fxr_handle, "hostfxr_close") orelse return error.SymbolMissing);
+
+        const runtimeconfig = try toCharT(allocator, config);
+        defer allocator.free(runtimeconfig);
+
+        // 3) Initialize runtime for our managed component
+        var host_ctx: ?*anyopaque = null;
+        const hr_init = init_fn(runtimeconfig.ptr, null, &host_ctx);
+        if (hr_init != 0 or host_ctx == null) return error.InitRuntimeFailed;
+
+        // 4) Get the "load_assembly_and_get_function_pointer" delegate
+        var load_fn_any: ?*anyopaque = null;
+        const hr_gd = getRuntimeDelegate(host_ctx, hostfxr.hdt_load_assembly_and_get_function_pointer, &load_fn_any);
+        if (hr_gd != 0 or load_fn_any == null) return error.GetDelegateFailed;
+
+        const load_fn: *const load_assembly_and_get_function_pointer_fn = @ptrCast(load_fn_any.?);
+
+        return .{
+            .handle = fxr_handle,
+            .context = host_ctx,
+            .close = close,
+            .load_fn = load_fn,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        _ = self.close(self.context);
+    }
+
+    pub fn load(
+        self: *const @This(),
+        allocator: std.mem.Allocator,
+        assembly_path: []const u8,
+        assembly_name: []const u8,
+        /// Name of the class
+        class: []const u8,
+        /// Name of the method
+        method: []const u8,
+    ) !*anyopaque {
+        const assembly_path_wide = try toCharT(allocator, assembly_path);
+        defer allocator.free(assembly_path_wide);
+
+        const type_name_utf8 = try std.fmt.allocPrint(allocator, "{s}, {s}", .{ class, assembly_name });
+        defer allocator.free(type_name_utf8);
+        const delegate_name_utf8 = try std.fmt.allocPrint(allocator, "{s}+{s}Delegate, {s}", .{ class, method, assembly_name });
+        defer allocator.free(delegate_name_utf8);
+
+        const type_name = try toCharT(allocator, type_name_utf8);
+        defer allocator.free(type_name);
+        const method_name = try toCharT(allocator, method);
+        defer allocator.free(method_name);
+        const delegate_name = try toCharT(allocator, delegate_name_utf8);
+        defer allocator.free(delegate_name);
+
+        var out_fn: ?*anyopaque = null;
+        const hr_la = self.load_fn(
+            assembly_path_wide.ptr,
+            type_name.ptr,
+            method_name.ptr,
+            delegate_name.ptr,
+            null,
+            &out_fn,
+        );
+
+        if (hr_la != 0 or out_fn == null) return error.LoadFunctionFailed;
+
+        return out_fn.?;
+    }
+};
