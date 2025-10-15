@@ -1,19 +1,20 @@
 using StoryTree.Engine;
+using StoryTree.Engine.Native;
 
 namespace Scripts
 {
     public class Entry: Behavior
     {
         void Awake() {
-            Native.Log("[Entry] Awake");
+            Interop.Log("[Entry] Awake");
         }
 
         void Update(float dt) {
-            Native.Log($"[Entry] Update dt={dt}");
+            Interop.Log($"[Entry] Update dt={dt}");
         }
 
         void Destroy() {
-            Native.Log($"[Entry] Destroy");
+            Interop.Log($"[Entry] Destroy");
         }
     }
 }

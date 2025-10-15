@@ -113,9 +113,9 @@ pub fn csharpExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.
     b.installArtifact(exe);
 
     const copy_managed = b.addInstallDirectory(.{
-        .source_dir = .{ .cwd_relative = "managed/Runtime/bin/Release/net8.0" },
+        .source_dir = .{ .cwd_relative = "Managed/Runtime/bin/Release/net8.0" },
         .install_dir = .bin,
-        .install_subdir = "managed",
+        .install_subdir = "runtime",
     });
     const copy_runtime = b.addInstallDirectory(.{
         .source_dir = .{ .cwd_relative = "dotnet" },

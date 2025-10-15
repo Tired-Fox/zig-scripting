@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Runtime.CompilerServices;
 
 namespace StoryTree {
@@ -13,22 +14,53 @@ namespace StoryTree {
             internal IntPtr nativeId = default;
         }
 
-
-        /**
-         * <summary>
-         * API to interact with the native system
-         * </summary>
-         */
-        public static class Native {
-            // Implemented by Zig (registered via mono_add_internal_call).
-
+        namespace Native {
             /**
              * <summary>
-             * Log a message to Stderr
+             * API to interact with the native system
              * </summary>
              */
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            public static extern void Log(string msg);
+            public static unsafe class Interop {
+                private static Functions* funcs;
+
+                /**
+                 * <summary>
+                 * Initialize the table of native interop functions
+                 * </summary>
+                 */
+                public static void Initialize(IntPtr table, int size)
+                {
+                    if (table == IntPtr.Zero) throw new ArgumentNullException(nameof(table));
+                    if (size != sizeof(Functions))
+                        throw new ArgumentException($"Host table size mismatch. Expected {sizeof(Functions)}, got {size}");
+                    funcs = (Functions*)table;
+                }
+
+                /**
+                 * <summary>
+                 * Log a message to Stderr
+                 * </summary>
+                 */
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                public static void Log(string msg)
+                {
+                    if (funcs == null) ThrowNotInit();
+                    fixed (byte* p = Encoding.UTF8.GetBytes(msg))
+                    {
+                        funcs->log(p, msg.Length);
+                    }
+                }
+
+                private static void ThrowNotInit() =>
+                    throw new InvalidOperationException("Native.Interop.Functions not initialized.");
+
+                private struct Functions {
+                    #pragma warning disable 0649
+
+                    // Typed unmanaged function pointers
+                    public delegate* unmanaged<byte*, int, void> log;
+                };
+            }
         }
 
         /**

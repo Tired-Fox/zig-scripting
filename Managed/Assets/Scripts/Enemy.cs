@@ -1,4 +1,4 @@
-using StoryTree.Engine;
+using StoryTree.Engine.Native;
 
 namespace Scripts
 {
@@ -9,7 +9,7 @@ namespace Scripts
 
         public void Update()
         {
-            Native.Log($"[Enemy] {Kind} slithers…");
+            Interop.Log($"[Enemy] {Kind} slithers…");
         }
     }
 }
