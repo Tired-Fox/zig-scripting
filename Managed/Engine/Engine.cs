@@ -45,9 +45,10 @@ namespace StoryTree {
                 public static void Log(string msg)
                 {
                     if (funcs == null) ThrowNotInit();
-                    fixed (byte* p = Encoding.UTF8.GetBytes(msg))
+                    byte[] bytes = Encoding.UTF8.GetBytes(msg + "\0");
+                    fixed (byte* p = bytes)
                     {
-                        funcs->log(p, msg.Length);
+                        funcs->log(p);
                     }
                 }
 
@@ -58,8 +59,27 @@ namespace StoryTree {
                     #pragma warning disable 0649
 
                     // Typed unmanaged function pointers
-                    public delegate* unmanaged<byte*, int, void> log;
+                    public delegate* unmanaged<byte*, void> log;
                 };
+            }
+        }
+
+        /**
+         *  <summary>
+         *  Debug Utilities
+         *  </summary>
+         */
+        public class Debug
+        {
+            /**
+             * <summary>
+             * Log a message to the hosts loggin system
+             * </summary>
+             * <param name="message">The message to log; usually a formatted string</param>
+             */
+            public static void Log(string message)
+            {
+                Native.Interop.Log(message);
             }
         }
 

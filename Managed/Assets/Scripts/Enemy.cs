@@ -1,15 +1,20 @@
-using StoryTree.Engine.Native;
+using StoryTree.Engine;
 
 namespace Scripts
 {
+    public enum EnemyType
+    {
+        Slime
+    }
+
     public class Enemy
     {
-        public string Kind = "Slime";
+        public EnemyType Kind = EnemyType.Slime;
         public int Health = 30;
 
         public void Update()
         {
-            Interop.Log($"[Enemy] {Kind} slithers…");
+            Debug.Log($"[Enemy] {Kind} slithers…");
         }
     }
 }

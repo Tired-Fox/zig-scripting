@@ -1,7 +1,5 @@
 using System;
 using System.Buffers;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -79,7 +77,7 @@ public sealed class RuntimeClass
         var methodName = Utils.ReadUtf8Z(name);
 
         var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
-        var cand = t.GetMethods(flags).Where(m => m.Name == methodName && m.GetParameters().Length == argCount).FirstOrDefault<MethodInfo>();
+        var cand = t.GetMethods(flags).FirstOrDefault<MethodInfo>(m => m.Name == methodName && m.GetParameters().Length == argCount);
 
         result = cand == null ? IntPtr.Zero : Host.Pin(cand);
     }
@@ -91,42 +89,47 @@ public sealed class RuntimeMethod
     public unsafe delegate void RuntimeInvokeDelegate(IntPtr method, void* instance, void** args);
     public unsafe static void RuntimeInvoke(IntPtr method, void* instancePtr, void** argv)
     {
-        Console.WriteLine("Runtime invoking method");
+        // Console.WriteLine("Runtime invoking method");
 
         var m = Host.Ref<MethodInfo>(method);
 
-        Console.WriteLine("  - Get params and arg length");
+        // Console.WriteLine("  - Get params and arg length");
         var parameters = m.GetParameters();
         var argc = parameters.Length;
 
         object? instance = null;
         if (instancePtr != null)
         {
-            Console.WriteLine("  - Unbox instance");
             instance = Host.Ref<object>((IntPtr)instancePtr);
         }
 
-        Console.WriteLine($"  - Unbox args [{argc}]");
+        // Console.WriteLine($"  - Unbox args [{argc}]");
         var args = new object?[argc];
         for (var i = 0; i < argc; i++)
         {
-            Console.WriteLine($"    - {parameters[i].ParameterType.FullName}");
+            // Console.WriteLine($"    - {parameters[i].ParameterType.FullName}");
             if (parameters[i].ParameterType.IsValueType) {
-                Console.WriteLine($"    - value null:{argv[i]==null}");
+                // Console.WriteLine($"    - VALUE null:{argv[i]==null}");
                 args[i] = ReadValueAsObject(argv[i], parameters[i].ParameterType);
-                Console.WriteLine("    - complete");
+                // Console.WriteLine("    - complete");
             } else if (parameters[i].ParameterType == typeof(string)) {
-                Console.WriteLine("    - string");
+                // Console.WriteLine("    - STRING");
                 args[i] = Marshal.PtrToStringUTF8((IntPtr)argv[i]);
-                Console.WriteLine("    - complete");
+                // Console.WriteLine("    - complete");
             } else {
-                Console.WriteLine("    - GCHandle");
+                // Console.WriteLine("    - GCHANDLE");
                 args[i] = GCHandle.FromIntPtr((IntPtr)argv[i]).Target;
-                Console.WriteLine("    - complete");
+                // Console.WriteLine("    - complete");
             }
         }
+        // foreach (var arg in args)
+        // {
+        //     Console.WriteLine($"  - Arg({arg})");
+        // }
 
-        Console.WriteLine("  - Invoke");
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | (instance is null ? BindingFlags.Static : BindingFlags.Instance);
+
+        // Console.WriteLine($"  - Invoke");
         m.Invoke(instance, args);
     }
 
@@ -136,8 +139,7 @@ public sealed class RuntimeMethod
 
         if (elem == typeof(IntPtr) || elem == typeof(nint))
         {
-            nint val = p == null ? default : Unsafe.Read<nint>(p);
-            return (IntPtr)val;
+            return (IntPtr)p;
         }
 
         // Fast path for common primitives
@@ -268,7 +270,7 @@ public static class Host
     }
 
     public static IntPtr Pin(object obj, bool pinned = false) => GCHandle.ToIntPtr(GCHandle.Alloc(obj, pinned ? GCHandleType.Pinned : GCHandleType.Normal));
-    public static T Ref<T>(IntPtr target) => (T)GCHandle.FromIntPtr(target).Target;
+    public static T? Ref<T>(IntPtr target) => (T?)GCHandle.FromIntPtr(target).Target;
     public static void Unpin(IntPtr id) => GCHandle.FromIntPtr(id).Free();
 
     static object? InvokeWithJson(object? targetOrNull, Type declaringType, string methodName, string jsonArgs)
@@ -281,7 +283,7 @@ public static class Host
             if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 args = doc.RootElement.EnumerateArray().Select(e => (object)e.Clone()).ToArray();
             else if (doc.RootElement.ValueKind != JsonValueKind.Undefined && doc.RootElement.ValueKind != JsonValueKind.Null)
-                args = new object[] { doc.RootElement.Clone() };
+                args = [doc.RootElement.Clone()];
         }
 
         // Find method candidates: instance or static depending on targetOrNull

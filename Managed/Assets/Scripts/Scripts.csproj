@@ -11,13 +11,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <!-- <ItemGroup> -->
-  <!-- Include all .cs files under this folder -->
-  <!--   <Compile Include="**\*.cs" /> -->
-  <!-- </ItemGroup> -->
-
   <ItemGroup>
-    <!-- Reference the Engine.dll we build next-door -->
-    <Reference Include="..\..\Engine\bin\Release\net8.0\Engine.dll" />
+    <!-- Reference the dynamically built Engine.dll -->
+    <Reference Include="Engine">
+      <HintPath>..\..\Engine\bin\Release\net8.0\Engine.dll</HintPath>
+      <Private>false</Private> 
+    </Reference>
   </ItemGroup>
 </Project>

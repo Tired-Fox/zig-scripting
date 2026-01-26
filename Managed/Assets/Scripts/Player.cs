@@ -1,5 +1,4 @@
 using StoryTree.Engine;
-using StoryTree.Engine.Native;
 
 public class Player: Behavior
 {
@@ -7,14 +6,14 @@ public class Player: Behavior
     public int Health = 100;
 
     void Awake() {
-        Interop.Log($"[Player] Awake Name={Name}, Health={Health}");
+        Debug.Log($"[Player] Awake Name={Name}, Health={Health}");
     }
 
     void Update(float dt) {
-        Interop.Log($"[Player] Update dt={dt}");
+        Debug.Log($"[Player] Update dt={dt}");
     }
 
     void Destroy() {
-        Interop.Log($"[Player] Destroy");
+        Debug.Log($"[Player] Destroy");
     }
 }

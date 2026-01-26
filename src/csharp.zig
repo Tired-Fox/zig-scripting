@@ -4,10 +4,10 @@ const bootstrap = @import("bootstrap.zig");
 const HostFxr = bootstrap.HostFxr;
 
 pub const Host = struct {
-    var CreateScope: ?*const fn(baseDir: ?[*:0]const u8, out: **Scope) callconv(.c) i32 = null;
-    var Destroy: ?*const fn(handle: *anyopaque) callconv(.c) i32 = null;
-    var Free: ?*const fn(handle: *anyopaque) callconv(.c) i32 = null;
-    var Ping: ?*const fn(out: *u32) callconv(.c) i32 = null;
+    var CreateScope: ?*const fn (baseDir: ?[*:0]const u8, out: **Scope) callconv(.c) i32 = null;
+    var Destroy: ?*const fn (handle: *anyopaque) callconv(.c) i32 = null;
+    var Free: ?*const fn (handle: *anyopaque) callconv(.c) i32 = null;
+    var Ping: ?*const fn (out: *u32) callconv(.c) i32 = null;
 
     pub fn ping() !bool {
         if (Ping) |clbk| {
@@ -52,9 +52,9 @@ pub const Host = struct {
 
 pub const Class = opaque {
     pub const VTable = struct {
-        var IsAssignableFrom: ?*const fn(baseType: *Class, targetType: *const Class, out: *i32) callconv(.c) i32 = null;
-        var New: ?*const fn(self: *Class, out: **Object) callconv(.c) i32 = null;
-        var GetMethod: ?*const fn(self: *Class, name: [*:0]const u8, param_count: u32, out: *?*Method) callconv(.c) i32 = null;
+        var IsAssignableFrom: ?*const fn (baseType: *Class, targetType: *const Class, out: *i32) callconv(.c) i32 = null;
+        var New: ?*const fn (self: *Class, out: **Object) callconv(.c) i32 = null;
+        var GetMethod: ?*const fn (self: *Class, name: [*:0]const u8, param_count: u32, out: *?*Method) callconv(.c) i32 = null;
     };
 
     pub fn new(self: *@This()) !*Object {
@@ -84,7 +84,7 @@ pub const Class = opaque {
 
 pub const Assembly = opaque {
     pub const VTable = struct {
-        var GetClass: ?*const fn(self: *const Assembly, type_name: [*:0]const u8, out: *?*Class) callconv(.c) i32 = null;
+        var GetClass: ?*const fn (self: *const Assembly, type_name: [*:0]const u8, out: *?*Class) callconv(.c) i32 = null;
     };
 
     pub fn getClass(self: *const @This(), type_name: [:0]const u8) !?*Class {
@@ -98,8 +98,7 @@ pub const Assembly = opaque {
 };
 
 pub const Object = opaque {
-    pub const VTable = struct {
-    };
+    pub const VTable = struct {};
 
     pub fn destroy(self: *const @This()) void {
         if (Host.Destroy) |clbk| {
@@ -110,7 +109,7 @@ pub const Object = opaque {
 
 pub const Method = opaque {
     pub const VTable = struct {
-        var RuntimeInvoke: ?*const fn(method: *Method, instance: ?*Object, argv: [*]?*anyopaque) callconv(.c) i32 = null;
+        var RuntimeInvoke: ?*const fn (method: *Method, instance: ?*Object, argv: [*]?*anyopaque) callconv(.c) i32 = null;
     };
 
     pub fn runtimeInvoke(self: *@This(), instance: ?*Object, args: []?*anyopaque) !void {
@@ -130,12 +129,12 @@ pub const Method = opaque {
 
 pub const Scope = opaque {
     pub const VTable = struct {
-        var LoadFromPath: ?*const fn(self: *Scope, path: [*:0]const u8, out: *?*Assembly) callconv(.c) i32 = null;
-        var LoadFromBytes: ?*const fn(self: *Scope, bytes: [*]const u8, length: i32, out: *?*Assembly) callconv(.c) i32 = null;
-        var Unload: ?*const fn(self: *Scope) callconv(.c) i32 = null;
+        var LoadFromPath: ?*const fn (self: *Scope, path: [*:0]const u8, out: *?*Assembly) callconv(.c) i32 = null;
+        var LoadFromBytes: ?*const fn (self: *Scope, bytes: [*]const u8, length: i32, out: *?*Assembly) callconv(.c) i32 = null;
+        var Unload: ?*const fn (self: *Scope) callconv(.c) i32 = null;
     };
 
-    pub fn loadFromPath(self: *@This(), path: [:0] const u8) !?*Assembly {
+    pub fn loadFromPath(self: *@This(), path: [:0]const u8) !?*Assembly {
         if (VTable.LoadFromPath) |clbk| {
             var assembly: ?*Assembly = undefined;
             if (clbk(self, path.ptr, &assembly) != 0) return error.LoadFromPath;
@@ -181,12 +180,12 @@ pub fn loadMethods(allocator: std.mem.Allocator, hostfxr: *HostFxr) !void {
     Method.VTable.RuntimeInvoke = @ptrCast(try hostfxr.getFunctionPointer(allocator, "RuntimeMethod", "RuntimeInvoke"));
 }
 
-fn log(bytes: [*]const u8, length: i32) void {
-    std.debug.print("{s}\n", .{ bytes[0..@intCast(length)] });
+fn log(bytes: [*:0]const u8) callconv(.c) void {
+    std.debug.print("{{ZIG}} {s}\n", .{bytes});
 }
 
-const InteropFunctions = packed struct {
-    log: *const fn(bytes: [*]const u8, length: i32) void = &log,
+const InteropFunctions = extern struct {
+    log: *const fn (bytes: [*:0]const u8) callconv(.c) void = log,
 };
 
 pub fn main() !void {
@@ -196,7 +195,7 @@ pub fn main() !void {
 
     var fxr = try HostFxr.init(allocator, .{
         .version = "8.0.20",
-        // Base path to host/fxr/..., pack/..., shared/... for the dotnet runtime
+        // Base path to host/fxr/*, pack/*, shared/* for the dotnet runtime
         .dotnet = "dotnet",
         .config = "runtime/Runtime.runtimeconfig.json",
         .dll = "runtime/Runtime.dll",
@@ -219,12 +218,12 @@ pub fn main() !void {
     const Interop = try engine_asm.getClass("StoryTree.Engine.Native.Interop") orelse return error.GetInteropClass;
     defer Interop.destroy();
 
-    const functions = InteropFunctions{};
+    var functions = InteropFunctions{};
     if (try Interop.getMethod("Initialize", 2)) |method| {
         defer method.destroy();
 
         var size: i32 = @sizeOf(InteropFunctions);
-        var args: [2]?*anyopaque = .{ @ptrCast(@constCast(&functions)), @ptrCast(&size) };
+        var args: [2]?*anyopaque = .{ @ptrCast(&functions), @ptrCast(&size) };
         try method.runtimeInvoke(null, &args);
     }
 
@@ -240,7 +239,5 @@ pub fn main() !void {
         defer method.destroy();
 
         _ = try method.runtimeInvoke(instance, &.{});
-        std.debug.print("Found method 'Awake'\n",.{});
     }
 }
-
