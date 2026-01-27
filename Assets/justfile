@@ -1,0 +1,11 @@
+set windows-shell := ["powershell", "-c"]
+
+VERSION := "8.0"
+
+engine:
+    csc -langversion:{{VERSION}} -target:library -out:../zig-out/lib/Engine.dll Engine/*.cs
+
+scripts:
+    csc -langversion:{{VERSION}} -target:library -r:../zig-out/lib/Engine.dll -out:../zig-out/lib/Scripts.dll Scripts/*.cs
+
+all: engine scripts

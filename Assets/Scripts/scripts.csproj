@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DebugType>portable</DebugType>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference the dynamically built Engine.dll -->
+    <Reference Include="StoryTree">
+      <HintPath>..\..\zig-out\lib\Engine.dll</HintPath>
+      <Private>false</Private> 
+    </Reference>
+  </ItemGroup>
+</Project>

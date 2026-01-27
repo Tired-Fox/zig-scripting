@@ -1,15 +1,6 @@
 const std = @import("std");
 const mono = @import("mono.zig");
 
-fn nativeLog(s: *mono.String) callconv(.c) void {
-    const c_str = s.toUtf8();
-    defer mono.free(@ptrCast(c_str));
-
-    if (c_str) |str| {
-        std.debug.print("[C#] {s}\n", .{ str });
-    }
-}
-
 const TypeDef = struct {
     assembly: [:0]const u8,
     namespace: [:0]const u8,
@@ -64,7 +55,7 @@ fn runScriptsInChildDomain(allocator: std.mem.Allocator, base: *mono.Class) !voi
     _ = child.set(false);
     _ = mono.Thread.attach(child);
 
-    const assembly = child.openAssembly("Managed/Scripts.dll") orelse return error.OpenAssemblyFailed;
+    const assembly = child.openAssembly("zig-out/lib/Scripts.dll") orelse return error.OpenAssemblyFailed;
     const img = assembly.getImage() orelse return error.NoImage;
 
     const types = try indexTypes(allocator, assembly, base);
@@ -85,12 +76,20 @@ fn runScriptsInChildDomain(allocator: std.mem.Allocator, base: *mono.Class) !voi
         if (klass.getMethodFromName("Awake", 0)) |method| {
             var exc: ?*mono.Object = null;
             _ = method.runtimeInvoke(instance, &.{}, &exc);
+            if (exc) |e| {
+                const msg: *mono.String = e.toString(null);
+                const c_str = msg.toUtf8();
+                defer mono.free(@ptrCast(c_str));
+                if (c_str) |emsg| {
+                    std.debug.print("{s}\n", .{emsg});
+                }
+            }
         }
 
         if (klass.getMethodFromName("Update", 1)) |method| {
             var exc: ?*mono.Object = null;
 
-            var args: [1]?*anyopaque = .{ null };
+            var args: [1]?*anyopaque = .{null};
 
             var dt: f32 = 0.016;
             args[0] = @ptrCast(&dt);
@@ -113,7 +112,18 @@ fn runScriptsInChildDomain(allocator: std.mem.Allocator, base: *mono.Class) !voi
 /// Load libraries and attach internal function calls available
 /// to the root domain
 fn registerInternal() !void {
-    mono.addInternalCall("StoryTree.Engine.Native::Log", @ptrCast(&nativeLog));
+    mono.addInternalCall("StoryTree.Debug::Log", @ptrCast(&log));
+}
+
+fn log(msg: *mono.String) callconv(.c) void {
+    const c_str = msg.toUtf8();
+    defer mono.free(@ptrCast(c_str));
+
+    if (c_str) |message| {
+        std.debug.print("{{ZIG}} {s}\n", .{message});
+    } else {
+        std.debug.print("{{ZIG}} MESSAGE ISN'T FOUND\n", .{});
+    }
 }
 
 pub fn main() !void {
@@ -127,7 +137,7 @@ pub fn main() !void {
 
     const root = mono.jitInitVersion("ZigGame", "v4.0.30319") orelse return error.MonoInitFailure;
 
-    const engine = root.openAssembly("Managed/Engine.dll") orelse return error.OpenAssemblyFailed;
+    const engine = root.openAssembly("zig-out/lib/Engine.dll") orelse return error.OpenAssemblyFailed;
     const img = engine.getImage() orelse return error.NoImage;
 
     try registerInternal();

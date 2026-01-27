@@ -88,7 +88,7 @@ pub const Domain = opaque {
         return mono_array_new(self, eclass, n);
     }
 
-    pub fn newObject(self: *Domain, class: *Class) ?*Object{
+    pub fn newObject(self: *Domain, class: *Class) ?*Object {
         return mono_object_new(self, class);
     }
 
@@ -200,10 +200,26 @@ pub const Class = opaque {
     }
 };
 
+pub const MethodDesc = opaque {
+    extern fn mono_method_desc_new(name: [*:0]const u8, include_namespace: bool) callconv(.c) ?*MethodDesc;
+    extern fn mono_method_desc_search_in_class(method: *MethodDesc, klass: *Class) callconv(.c) ?*Method;
+    extern fn mono_method_desc_search_in_image(method: *MethodDesc, image: *Image) callconv(.c) ?*Method;
+
+    pub fn new(name: [:0]const u8, include_namespace: bool) ?*MethodDesc {
+        return mono_method_desc_new(name.ptr, include_namespace);
+    }
+    pub fn searchInClass(self: *@This(), klass: *Class) ?*Method {
+        return mono_method_desc_search_in_class(self, klass);
+    }
+    pub fn searchInImage(self: *@This(), image: *Image) ?*Method {
+        return mono_method_desc_search_in_image(self, image);
+    }
+};
+
 pub const Method = opaque {
     extern fn mono_runtime_invoke(method: *Method, obj: ?*Object, params: [*]?*anyopaque, exc: ?*?*Object) callconv(.c) ?*Object;
 
-    pub fn runtimeInvoke(self: *Method, obj: ?*Object, params: []?*anyopaque, exc: ?*?*Object) ?*Object {
+    pub fn runtimeInvoke(self: *Method, obj: ?*Object, params: []?*anyopaque, exc: *?*Object) ?*Object {
         return mono_runtime_invoke(self, obj, params.ptr, exc);
     }
 };
@@ -229,6 +245,7 @@ pub const GC = opaque {
 pub const Object = opaque {
     extern fn mono_object_unbox(obj: *Object) callconv(.c) *anyopaque;
     extern fn mono_runtime_object_init(obj: *Object) callconv(.c) void;
+    extern fn mono_object_to_string(obj: *Object, exception: ?*?*Object) callconv(.c) *String;
 
     pub fn runtimeInit(self: *Object) void {
         mono_runtime_object_init(self);
@@ -237,6 +254,10 @@ pub const Object = opaque {
     pub fn unbox(self: *Object, T: type) *T {
         const p = mono_object_unbox(self);
         return @ptrCast(@alignCast(p));
+    }
+
+    pub fn toString(self: *Object, exception: ?*?*Object) *String {
+        return mono_object_to_string(self, exception);
     }
 };
 

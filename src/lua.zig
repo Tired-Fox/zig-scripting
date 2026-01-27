@@ -79,7 +79,7 @@ const LuaEventLoop = struct {
                     lua.setField(-2, "event");
 
                     lua.setField(-2, "payload");
-                }
+                },
             }
         } else {
             lua.pushNil();
@@ -132,7 +132,7 @@ fn newUserdata(lua: *Lua, value: anytype) !void {
         lua.pushValue(-1);
         lua.setField(-2, "__index");
 
-        inline for(Info.decls) |decl| {
+        inline for (Info.decls) |decl| {
             // Add helloworld function
             lua.pushFunction(zlua.wrap(@field(T, decl.name)));
             lua.setField(-2, decl.name);

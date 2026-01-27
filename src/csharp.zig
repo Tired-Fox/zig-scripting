@@ -109,10 +109,10 @@ pub const Object = opaque {
 
 pub const Method = opaque {
     pub const VTable = struct {
-        var RuntimeInvoke: ?*const fn (method: *Method, instance: ?*Object, argv: [*]?*anyopaque) callconv(.c) i32 = null;
+        var RuntimeInvoke: ?*const fn (method: *Method, instance: ?*Object, argv: [*]const ?*anyopaque) callconv(.c) i32 = null;
     };
 
-    pub fn runtimeInvoke(self: *@This(), instance: ?*Object, args: []?*anyopaque) !void {
+    pub fn runtimeInvoke(self: *@This(), instance: ?*Object, args: []const ?*anyopaque) !void {
         if (VTable.RuntimeInvoke) |clbk| {
             if (clbk(self, instance, args.ptr) != 0) return error.MethodRuntimeInvoke;
             return;
@@ -239,5 +239,14 @@ pub fn main() !void {
         defer method.destroy();
 
         _ = try method.runtimeInvoke(instance, &.{});
+    }
+
+    if (try player_cls.getMethod("Update", 1)) |method| {
+        var dt: f32 = 0.016;
+        try method.runtimeInvoke(instance, &.{@ptrCast(&dt)});
+    }
+
+    if (try player_cls.getMethod("Destroy", 0)) |method| {
+        try method.runtimeInvoke(instance, &.{});
     }
 }
